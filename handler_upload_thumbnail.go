@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"mime"
@@ -55,14 +57,14 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	file, fileheader, err := r.FormFile("thumbnail")
+	file, fileHeader, err := r.FormFile("thumbnail")
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Could not fetch file & fileheader with FromFile from the request", err)
 		return
 	}
 	defer file.Close()
 
-	mediaType, _, err := mime.ParseMediaType(fileheader.Header.Get("Content-Type"))
+	mediaType, _, err := mime.ParseMediaType(fileHeader.Header.Get("Content-Type"))
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "invalid Content-Type header", err)
 		return
@@ -73,10 +75,17 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	randomSlice := make([]byte, 32)
+	_, err = rand.Read(randomSlice)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "failed to generate filename for thumbnail", err)
+	}
+	randomName := base64.RawURLEncoding.EncodeToString(randomSlice)
+
 	mediaTypeSplit := strings.Split(mediaType, "/")
 	fileExt := mediaTypeSplit[1]
 
-	filename := fmt.Sprintf("%s.%s", videoID, fileExt)
+	filename := fmt.Sprintf("%s.%s", randomName, fileExt)
 	path := filepath.Join(cfg.assetsRoot, filename)
 
 	diskFile, err := os.Create(path)
@@ -92,7 +101,7 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	thumbnailURL := fmt.Sprintf("http://localhost:%s/assets/%s.%s", cfg.port, videoID, fileExt)
+	thumbnailURL := fmt.Sprintf("http://localhost:%s/assets/%s.%s", cfg.port, randomName, fileExt)
 	metadata.ThumbnailURL = &thumbnailURL
 
 	err = cfg.db.UpdateVideo(metadata)
