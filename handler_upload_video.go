@@ -96,18 +96,46 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	processedPath, err := processVideoForFastStart(tempFile.Name())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "could not process video", err)
+	}
+	defer os.Remove(processedPath)
+
+	processedFile, err := os.Open(processedPath)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "could not open processed video", err)
+	}
+
+	aspectRatio, err := getVideoAspectRatio(processedFile.Name())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "couldnt get video aspect ratio", err)
+		return
+	}
+
+	var prefix string
+
+	switch aspectRatio {
+	case "16:9":
+		prefix = "landscape"
+	case "9:16":
+		prefix = "portrait"
+	default:
+		prefix = "other"
+	}
+
 	randomBytes := make([]byte, 32)
 	_, err = rand.Read(randomBytes)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "couldn't generate key", err)
 		return
 	}
-	key := fmt.Sprintf("%s.%s", hex.EncodeToString(randomBytes), "mp4")
+	key := fmt.Sprintf("%s/%s.%s", prefix, hex.EncodeToString(randomBytes), "mp4")
 
 	_, err = cfg.s3Client.PutObject(r.Context(), &s3.PutObjectInput{
 		Bucket:      aws.String(cfg.s3Bucket),
 		Key:         aws.String(key),
-		Body:        tempFile,
+		Body:        processedFile,
 		ContentType: aws.String(mediaType),
 	})
 	if err != nil {
